@@ -147,15 +147,25 @@ async function resolveIdentity(): Promise<Identity> {
   try {
     const { DiscordSDK } = await import("@discord/embedded-app-sdk");
     const sdk = new DiscordSDK(CLIENT_ID);
-    // In a plain browser the bridge never answers; give up to guest quickly
+    // In a plain browser the bridge never answers; give up to guest eventually
     // instead of hanging the boot screen on a session that will never come.
+    // 4s cut real cold starts (mobile webviews especially) short, and a sign-in
+    // abandoned mid-handshake never registers a completed session back to the
+    // client — the app never lands in the App Launcher's Recents. 20s is far
+    // past every observed iframe startup while still bounding a foreign frame.
     await Promise.race([
       sdk.ready(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("sdk bridge timeout")), 4000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("sdk bridge timeout")), 20_000)),
     ]);
+    // The cornerstone scope triplet from Discord's own Activity tutorial:
+    // applications.commands is what registers the embed with the client's
+    // app-usage tracking (launch surfaces like App Launcher Recents), and
+    // prompt: none skips re-consent once the user has already granted these
+    // scopes — first launch shows the OAuth modal as usual.
     const { code } = await sdk.commands.authorize({
       client_id: CLIENT_ID,
-      scope: ["identify", "guilds.members.read"],
+      response_type: "code",
+      scope: ["identify", "applications.commands", "guilds.members.read"],
       prompt: "none",
     });
     const tokenResponse = await fetch("/api/token", {
